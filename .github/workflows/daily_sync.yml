@@ -1,0 +1,45 @@
+name: Daily Garmin → Notion Sync
+
+on:
+  schedule:
+    # 毎日 AM 6:00 JST (= 21:00 UTC 前日)
+    - cron: '0 21 * * *'
+  workflow_dispatch: # 手動実行も可能
+
+permissions:
+  contents: write  # coaching_memory.md の commit/push に必要
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python main.py
+
+      - name: Commit coaching memory updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coaching_memory.md
+          # 変更がある場合のみコミット
+          git diff --staged --quiet || git commit -m "🧠 Update coaching memory $(date -u +%Y-%m-%d)"
+          git push
