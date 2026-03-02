@@ -2,8 +2,8 @@ name: Daily Garmin-Notion Sync
 
 on:
   schedule:
-    # Every day at AM 6:00 JST (= 21:00 UTC previous day)
-    - cron: '0 21 * * *'
+    # Every day at PM 21:30 JST (= 21:00 UTC previous day)
+    - cron: '30 12 * * *'
   workflow_dispatch: # Manual trigger
 
 permissions:
