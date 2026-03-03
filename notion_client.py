@@ -7,6 +7,7 @@ Notion API 操作モジュール
 import requests
 import time
 import math
+import datetime
 
 from config import (
     NOTION_HEADERS,
@@ -16,6 +17,7 @@ from config import (
     MAX_HR,
     PACE_ZONES,
     TRIMP_THRESHOLDS,
+    LOOKBACK_DAYS,
 )
 
 
@@ -118,6 +120,7 @@ def _notion_post(url: str, payload: dict) -> dict | None:
     if resp.status_code != 200:
         print(f"  ❌ Notion API エラー: {resp.status_code} - {resp.text[:200]}")
         return None
+
     return resp.json()
 
 
@@ -136,6 +139,7 @@ def _notion_patch(url: str, payload: dict) -> dict | None:
     if resp.status_code != 200:
         print(f"  ⚠️ Notion PATCH エラー: {resp.status_code} - {resp.text[:200]}")
         return None
+
     return resp.json()
 
 
@@ -234,6 +238,112 @@ def query_existing_activity_ids(database_id: str) -> set[str]:
 
 
 # ===================================================================
+# 重複チェック（作成直前の個別確認）
+# ===================================================================
+
+def check_activity_exists(database_id: str, activity_id: str) -> bool:
+    """作成直前にActivity IDがNotionに存在するか確認（二重登録防止）"""
+    payload = {
+        "filter": {
+            "property": "Activity ID",
+            "rich_text": {"equals": str(activity_id)}
+        },
+        "page_size": 1,
+    }
+    resp = requests.post(
+        f"https://api.notion.com/v1/databases/{database_id}/query",
+        headers=NOTION_HEADERS,
+        json=payload,
+    )
+    time.sleep(NOTION_RATE_LIMIT_WAIT)
+
+    if resp.status_code != 200:
+        return False
+
+    results = resp.json().get("results", [])
+    return len(results) > 0
+
+
+# ===================================================================
+# コーチング未記入ページ検索
+# ===================================================================
+
+def find_pages_without_coaching(database_id: str) -> list[dict]:
+    """直近 LOOKBACK_DAYS 日以内でコーチングフィードバック未記入のページを検索"""
+    cutoff = (datetime.datetime.now()
+              - datetime.timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+
+    pages_without_coaching = []
+    has_more = True
+    start_cursor = None
+
+    print(f"\n🔍 コーチング未記入ページを検索中 (>= {cutoff})...")
+
+    while has_more:
+        payload = {
+            "filter": {
+                "property": "Date",
+                "date": {"on_or_after": cutoff}
+            },
+            "page_size": 100,
+        }
+        if start_cursor:
+            payload["start_cursor"] = start_cursor
+
+        resp = requests.post(
+            f"https://api.notion.com/v1/databases/{database_id}/query",
+            headers=NOTION_HEADERS,
+            json=payload,
+        )
+        time.sleep(NOTION_RATE_LIMIT_WAIT)
+
+        if resp.status_code != 200:
+            break
+
+        data = resp.json()
+        for page in data.get("results", []):
+            page_id = page["id"]
+
+            # ページのブロックを取得して "Coach Feedback" があるか確認
+            blocks_resp = requests.get(
+                f"https://api.notion.com/v1/blocks/{page_id}/children?page_size=100",
+                headers=NOTION_HEADERS,
+            )
+            time.sleep(NOTION_RATE_LIMIT_WAIT)
+
+            has_coaching = False
+            if blocks_resp.status_code == 200:
+                for block in blocks_resp.json().get("results", []):
+                    if block.get("type") == "heading_2":
+                        texts = block.get("heading_2", {}).get("rich_text", [])
+                        for t in texts:
+                            if "Coach Feedback" in t.get("plain_text", ""):
+                                has_coaching = True
+                                break
+
+            if not has_coaching:
+                props = page.get("properties", {})
+                aid_prop = props.get("Activity ID", {}).get("rich_text", [])
+                activity_id = aid_prop[0].get("plain_text", "") if aid_prop else ""
+                name_prop = props.get("Activity Name", {}).get("title", [])
+                name = name_prop[0].get("plain_text", "") if name_prop else ""
+                date_prop = props.get("Date", {}).get("date", {})
+                date_str = date_prop.get("start", "") if date_prop else ""
+                pages_without_coaching.append({
+                    "page_id": page_id,
+                    "activity_id": activity_id,
+                    "name": name,
+                    "date": date_str,
+                })
+
+        has_more = data.get("has_more", False)
+        start_cursor = data.get("next_cursor")
+
+    print(f"  → コーチング未記入: {len(pages_without_coaching)}件")
+    return pages_without_coaching
+
+
+# ===================================================================
 # ラップテーブル構築
 # ===================================================================
 
@@ -259,6 +369,7 @@ def build_lap_table_blocks(laps: list) -> list:
         "Lap", "距離(km)", "タイム", "ペース(/km)",
         "平均心拍", "最大心拍", "ピッチ", "ストライド(cm)",
     ]
+
     header_row = {
         "type": "table_row",
         "table_row": {"cells": [_build_text_cell(h) for h in headers]},
@@ -269,6 +380,7 @@ def build_lap_table_blocks(laps: list) -> list:
         distance_km = lap.get("distance", 0) / 1000
         duration_s = lap.get("duration", 0)
         lap_index = lap.get("lapIndex", i + 1)
+
         row = {
             "type": "table_row",
             "table_row": {
@@ -317,14 +429,17 @@ def build_lap_table_blocks(laps: list) -> list:
                 ]
             },
         }
+
         dyn_headers = [
             "Lap", "パワー(W)", "接地時間(ms)", "上下動(cm)",
             "上昇(m)", "下降(m)", "気温(℃)",
         ]
+
         dyn_header_row = {
             "type": "table_row",
             "table_row": {"cells": [_build_text_cell(h) for h in dyn_headers]},
         }
+
         dyn_rows = []
         for i, lap in valid_laps:
             lap_index = lap.get("lapIndex", i + 1)
