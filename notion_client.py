@@ -156,6 +156,44 @@ def notion_append_blocks(page_id: str, blocks: list) -> dict | None:
     )
 
 
+def fetch_athlete_response(page_id: str) -> str | None:
+    """NotionページのYour Responseセクションからコメントを取得"""
+    resp = requests.get(
+        f"https://api.notion.com/v1/blocks/{page_id}/children",
+        headers=NOTION_HEADERS,
+    )
+    time.sleep(NOTION_RATE_LIMIT_WAIT)
+
+    if resp.status_code != 200:
+        return None
+
+    blocks = resp.json().get("results", [])
+
+    # heading_3 の "Your Response" の次のブロック（paragraph）を取得
+    found_header = False
+    for block in blocks:
+        if found_header:
+            if block.get("type") == "paragraph":
+                texts = block.get("paragraph", {}).get("rich_text", [])
+                plain_text = "".join(t.get("plain_text", "") for t in texts)
+                # デフォルトプレースホルダーはNoneとして扱う
+                if "ここにコメントを入力" in plain_text or not plain_text.strip():
+                    return None
+                return plain_text.strip()
+            else:
+                found_header = False
+
+        if block.get("type") == "heading_3":
+            heading_text = "".join(
+                t.get("plain_text", "")
+                for t in block.get("heading_3", {}).get("rich_text", [])
+            )
+            if "Your Response" in heading_text:
+                found_header = True
+
+    return None
+
+
 def query_existing_activity_ids(database_id: str) -> set[str]:
     """既にNotionに登録済みのActivity IDセットを取得"""
     existing_ids = set()
