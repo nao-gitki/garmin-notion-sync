@@ -85,3 +85,13 @@ COACH_MODEL = "x-ai/grok-4.1-fast"
 COACHING_MEMORY_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "coaching_memory.md"
 )
+
+# ===================================================================
+# Google Cloud 設定
+# ===================================================================
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "run-log-automation-2026-memory")
+
+# ===================================================================
+# Discord 設定
+# ===================================================================
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")

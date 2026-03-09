@@ -1,11 +1,12 @@
 """
 Garmin Connect → Notion 日次同期 メインスクリプト
 
-1. 過去5日分のランニングアクティビティを取得
-2. 未登録分をNotionに転記（ラップテーブル付き）
-3. OpenRouter経由でLLMコーチングフィードバックを生成
+1. GCS から coaching_memory.md をダウンロード
+2. 過去5日分のランニングアクティビティを取得
+3. 未登録分をNotionに転記（ラップテーブル付き）
+4. OpenRouter経由でLLMコーチングフィードバックを生成
    - 同日複数件は「1日の流れ」としてまとめてフィードバック
-4. coaching_memory.md を更新（Git commit/pushはGitHub Actionsが実行）
+5. coaching_memory.md を GCS にアップロード
 """
 from collections import defaultdict
 
@@ -33,9 +34,15 @@ from coach import (
     generate_coaching_feedback_for_day,
     append_feedback_to_notion,
 )
+from gcs_storage import download_memory, upload_memory
+from config import COACHING_MEMORY_PATH
 
 
 def main():
+    # ----- 0. GCS から coaching_memory.md をダウンロード -----
+    print("☁️  GCS から coaching_memory.md をダウンロード中...")
+    download_memory(COACHING_MEMORY_PATH)
+
     # ----- 1. Garminログイン -----
     client = create_client()
 
@@ -54,6 +61,8 @@ def main():
 
     if not new_activities:
         print("✅ すべてのアクティビティが登録済みです。")
+        # GCS にアップロード（メモリー更新がなくても整合性確保）
+        upload_memory(COACHING_MEMORY_PATH)
         return
 
     # ----- 4. 古い順にソートして日付グループ化 -----
@@ -203,6 +212,9 @@ def main():
     print(f"  🧠 コーチング生成: {coaching_count}日")
     print(f"  💓 安静時心拍 取得日数: {len(resting_hr_cache)}")
     print("=" * 50)
+
+    # ----- 5. GCS に coaching_memory.md をアップロード -----
+    upload_memory(COACHING_MEMORY_PATH)
 
 
 if __name__ == "__main__":
