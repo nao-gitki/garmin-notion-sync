@@ -78,8 +78,8 @@ TRIMP_THRESHOLDS = {
 # ===================================================================
 # OpenRouter / LLMコーチング設定
 # ===================================================================
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-COACH_MODEL = os.environ.get("COACH_MODEL", "x-ai/grok-4.1-fast")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+COACH_MODEL = os.environ.get("COACH_MODEL", "anthropic/claude-sonnet-4.6")
 
 # coaching_memory.md のパス（リポジトリルートからの相対パス）
 COACHING_MEMORY_PATH = os.path.join(
